@@ -41,6 +41,13 @@ If you accidentally run it with `sh`, you'll get an error message with instructi
 - **BTRFS Filesystem**: The script is optimized for BTRFS filesystems (particularly Fedora installations)
 - **Available Tools**: `lsblk`, `dd`, `uuidgen`, `partprobe`, `btrfs`
 
+### Recommended (for faster cloning):
+
+- **partclone**: Dramatically speeds up cloning by only copying used space instead of the entire drive
+  - Install with: `sudo dnf install partclone`
+  - **Speed improvement**: 3-9x faster for typical clones
+  - Without it, the script falls back to `dd` (which is slower but always available)
+
 ## Usage
 
 ### Running the Script

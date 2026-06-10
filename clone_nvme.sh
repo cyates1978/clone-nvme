@@ -35,6 +35,7 @@ trap cleanup EXIT
 # --- VALIDATE FEDORA 44 REQUIREMENTS ---
 validate_requirements() {
     local missing_tools=()
+    local partclone_available=false
     
     # Check for required commands
     for cmd in lsblk dd partprobe btrfs uuidgen awk grep; do
@@ -42,6 +43,11 @@ validate_requirements() {
             missing_tools+=("$cmd")
         fi
     done
+    
+    # Check for partclone (optional but highly recommended)
+    if command -v partclone.auto &> /dev/null || command -v partclone &> /dev/null; then
+        partclone_available=true
+    fi
     
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         echo "Error: The following required tools are not installed:"
@@ -52,6 +58,28 @@ validate_requirements() {
         echo "On Fedora 44, install missing tools with:"
         echo "  sudo dnf install util-linux e2fsprogs btrfs-progs util-linux"
         exit 1
+    fi
+    
+    # Warn user if partclone is missing and explain the benefit
+    if [[ "$partclone_available" == false ]]; then
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo "║  ⚠️  RECOMMENDED: Install partclone for MUCH faster cloning     ║"
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        echo ""
+        echo "Cloning speed comparison:"
+        echo "  • WITH partclone:    Copies only used space (1-2 TB = ~10-30 min)"
+        echo "  • WITHOUT partclone: Copies entire drive (1-2 TB = ~30-90 min)"
+        echo ""
+        echo "To install partclone on Fedora 44:"
+        echo "  sudo dnf install partclone"
+        echo ""
+        read -p "Continue without partclone? (y/N): " proceed
+        if [[ "$proceed" != "y" && "$proceed" != "Y" ]]; then
+            echo "Exiting. Please install partclone and try again."
+            exit 1
+        fi
+        echo ""
     fi
     
     # Check if running with sudo/root access
@@ -96,11 +124,15 @@ while [[ $# -gt 0 ]]; do
             echo "  --dry-run     Show what would happen without making any changes"
             echo "  --help        Display this help message"
             echo ""
-            echo "REQUIREMENTS:"
+            echo "REQUIREMENTS (REQUIRED):"
             echo "  - Bash 4.0+ (NOT sh/dash)"
             echo "  - sudo access (or run as root)"
             echo "  - BTRFS tools (btrfs-progs)"
             echo "  - util-linux (lsblk, partprobe, mount)"
+            echo ""
+            echo "RECOMMENDED (for 3-9x faster cloning):"
+            echo "  - partclone: Only copies used space instead of entire drive"
+            echo "    Install with: sudo dnf install partclone"
             echo ""
             echo "DESCRIPTION:"
             echo "  This script clones one NVMe drive to another, including:"
@@ -132,6 +164,69 @@ execute_or_show() {
         echo "[DRY-RUN] $@"
     else
         "$@"
+    fi
+}
+
+# --- SMART CLONING FUNCTION ---
+# Uses partclone for efficient cloning (only copies used space)
+# Falls back to dd if partclone is not available
+
+clone_disk() {
+    local source="$1"
+    local destination="$2"
+    
+    # Detect if partclone is available
+    local use_partclone=false
+    if command -v partclone.auto &> /dev/null; then
+        use_partclone=true
+        local clone_method="partclone (fast - only copies used space)"
+    else
+        local clone_method="dd (slow - copies every byte)"
+    fi
+    
+    echo "Cloning method: $clone_method"
+    echo ""
+    
+    if [[ "$use_partclone" == true ]]; then
+        # Use partclone for fast cloning
+        echo "Step 2a: Copying partition table..."
+        if [[ "$DRY_RUN" == false ]]; then
+            # Copy just the MBR/GPT (first 1MB is usually safe)
+            sudo dd if="$source" of="$destination" bs=512 count=2048 2>/dev/null
+        fi
+        
+        echo "Step 2b: Cloning partitions with partclone (fast)..."
+        echo "         Only copying used space - this will be much faster!"
+        echo ""
+        
+        if [[ "$DRY_RUN" == false ]]; then
+            # Get list of partitions
+            local partitions=$(sudo lsblk -np "$source" | grep -E "^${source}p[0-9]" | awk '{print $1}')
+            
+            local part_num=1
+            for src_part in $partitions; do
+                dst_part="${destination}p${part_num}"
+                
+                echo "  Cloning $src_part to $dst_part..."
+                
+                # Use partclone to clone only used space
+                if ! sudo partclone.auto -s "$src_part" -o "$dst_part" -N -L -L 2>/dev/null; then
+                    # Fallback to dd if partclone fails for this partition
+                    echo "  Partclone failed for $src_part, falling back to dd..."
+                    sudo dd if="$src_part" of="$dst_part" bs=4M status=progress conv=fsync
+                fi
+                
+                part_num=$((part_num + 1))
+            done
+        fi
+    else
+        # Use dd for cloning (slower but always available)
+        echo "Step 2: Cloning with dd (this will copy every byte)..."
+        echo ""
+        
+        if [[ "$DRY_RUN" == false ]]; then
+            sudo dd if="$source" of="$destination" bs=4M status=progress conv=fsync
+        fi
     fi
 }
 
@@ -292,14 +387,13 @@ fi
 echo ""
 
 echo "Step 2: Cloning disk layout and data..."
-echo "        This copies every bit from $SRC to $DST (4MB blocks)"
-echo "        This may take several minutes depending on drive size..."
 if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY-RUN] Would execute: sudo dd if=\"$SRC\" of=\"$DST\" bs=4M status=progress conv=fsync"
+    echo "[DRY-RUN] Would detect and use fastest available cloning method"
+    echo "[DRY-RUN] Preferred: partclone (only copies used space)"
+    echo "[DRY-RUN] Fallback: dd (copies every byte)"
     echo "[DRY-RUN] This copies all partitions, filesystems, and data from source to destination"
 else
-    # Using 'dd' to copy the exact partition table and raw data
-    sudo dd if="$SRC" of="$DST" bs=4M status=progress conv=fsync
+    clone_disk "$SRC" "$DST"
 fi
 echo ""
 
