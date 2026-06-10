@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# NVMe Clone Script - Version 0.4.0
-# Fedora 44 Compatible NVMe Cloning Tool
+# NVMe Clone Script - Version 0.5.0
+# Multi-Filesystem NVMe Cloning Tool (Fedora 44 Compatible)
 
 # Ensure this script is run with bash, not sh
 if [[ -z "$BASH_VERSION" ]]; then
@@ -47,13 +47,12 @@ validate_requirements() {
     # Check for partclone (optional but highly recommended)
     # Fedora 44 installs partclone as filesystem-specific binaries
     # Try multiple ways to locate it in case it's not in the standard PATH
-    if [[ -x /usr/bin/partclone.btrfs ]] || [[ -x /usr/sbin/partclone.btrfs ]]; then
+    if [[ -x /usr/bin/partclone.btrfs ]] || [[ -x /usr/sbin/partclone.btrfs ]] || \
+       [[ -x /usr/bin/partclone.ext4 ]] || [[ -x /usr/sbin/partclone.ext4 ]] || \
+       [[ -x /usr/bin/partclone.auto ]] || [[ -x /usr/sbin/partclone.auto ]]; then
         partclone_available=true
-    elif command -v partclone.btrfs &> /dev/null; then
-        partclone_available=true
-    elif [[ -x /usr/bin/partclone.auto ]] || [[ -x /usr/sbin/partclone.auto ]]; then
-        partclone_available=true
-    elif command -v partclone.auto &> /dev/null; then
+    elif command -v partclone.btrfs &> /dev/null || command -v partclone.ext4 &> /dev/null || \
+         command -v partclone.auto &> /dev/null; then
         partclone_available=true
     elif [[ -x /usr/bin/partclone ]] || [[ -x /usr/sbin/partclone ]]; then
         partclone_available=true
@@ -122,7 +121,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "╔════════════════════════════════════════════════════════════════════╗"
-            echo "║  NVMe Clone Script - Version 0.4.0 (Fedora 44 Compatible)          ║"
+            echo "║  NVMe Clone Script - Version 0.5.0 (Multi-Filesystem Support)     ║"
             echo "╚════════════════════════════════════════════════════════════════════╝"
             echo ""
             echo "⚠️  IMPORTANT: This script MUST be run with BASH, not sh!"
@@ -154,9 +153,10 @@ while [[ $# -gt 0 ]]; do
             echo "DESCRIPTION:"
             echo "  This script clones one NVMe drive to another, including:"
             echo "  - Copying all data and partition layout"
-            echo "  - Auto-detecting BTRFS filesystems"
-            echo "  - Updating filesystem UUIDs to avoid conflicts"
-            echo "  - Resizing the filesystem to fill the destination drive"
+            echo "  - Auto-detecting filesystems (BTRFS, ext4, ext3, XFS, etc.)"
+            echo "  - Updating filesystem UUIDs (BTRFS) to avoid conflicts"
+            echo "  - Resizing the filesystem (BTRFS) to fill the destination drive"
+            echo "  - For ext4/other filesystems, UUIDs and sizing are handled automatically"
             echo ""
             echo "USAGE:"
             echo "  1. Preview with: bash clone_nvme.sh --dry-run"
@@ -192,31 +192,40 @@ clone_disk() {
     local source="$1"
     local destination="$2"
     
-    # Detect if partclone is available (prioritize filesystem-specific versions)
+    # Detect if partclone is available (try filesystem-specific versions)
     # Fedora 44 installs partclone as individual filesystem tools
     local use_partclone=false
     local partclone_cmd=""
     
-    # Direct path checks - prioritize BTRFS version since that's what we use
-    if [[ -x /usr/bin/partclone.btrfs ]]; then
-        use_partclone=true
-        partclone_cmd="/usr/bin/partclone.btrfs"
-    elif [[ -x /usr/sbin/partclone.btrfs ]]; then
-        use_partclone=true
-        partclone_cmd="/usr/sbin/partclone.btrfs"
-    elif [[ -x /usr/bin/partclone.auto ]]; then
+    # Direct path checks - prioritize auto-detection first, then filesystem-specific
+    if [[ -x /usr/bin/partclone.auto ]]; then
         use_partclone=true
         partclone_cmd="/usr/bin/partclone.auto"
     elif [[ -x /usr/sbin/partclone.auto ]]; then
         use_partclone=true
         partclone_cmd="/usr/sbin/partclone.auto"
-    # Fallback to command lookup
-    elif command -v partclone.btrfs &> /dev/null; then
+    elif [[ -x /usr/bin/partclone.btrfs ]]; then
         use_partclone=true
-        partclone_cmd="partclone.btrfs"
+        partclone_cmd="/usr/bin/partclone.btrfs"
+    elif [[ -x /usr/bin/partclone.ext4 ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/bin/partclone.ext4"
+    elif [[ -x /usr/sbin/partclone.btrfs ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/sbin/partclone.btrfs"
+    elif [[ -x /usr/sbin/partclone.ext4 ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/sbin/partclone.ext4"
+    # Fallback to command lookup
     elif command -v partclone.auto &> /dev/null; then
         use_partclone=true
         partclone_cmd="partclone.auto"
+    elif command -v partclone.btrfs &> /dev/null; then
+        use_partclone=true
+        partclone_cmd="partclone.btrfs"
+    elif command -v partclone.ext4 &> /dev/null; then
+        use_partclone=true
+        partclone_cmd="partclone.ext4"
     fi
     
     if [[ "$use_partclone" == true ]]; then
@@ -391,13 +400,12 @@ echo ""
 
 echo "Operations that will be performed:"
 echo "  1. Unmount any mounted partitions on both devices"
-echo "  2. Copy all data and partition layout from $SRC to $DST (using dd)"
+echo "  2. Copy all data and partition layout from $SRC to $DST (using partclone or dd)"
 echo "  3. Update partition table on $DST"
-echo "  4. Generate new unique filesystem UUIDs on $DST"
-echo "     (prevents conflicts when both drives are connected)"
-echo "  5. Mount the cloned filesystem"
-echo "  6. Expand the filesystem to use full capacity of $DST"
-echo "  7. Unmount the cloned filesystem"
+echo "  4. Update filesystem UUID (BTRFS only - ext4/others handle automatically)"
+echo "  5. Mount filesystem (BTRFS only - for resize operations)"
+echo "  6. Expand filesystem to full capacity (BTRFS only - ext4/others auto-expand)"
+echo "  7. Unmount filesystem (cleanup)"
 echo ""
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -453,85 +461,116 @@ echo "Detecting BTRFS filesystems on the cloned drive..."
 echo ""
 
 # Detect BTRFS partitions automatically
-detect_btrfs_partition() {
+# Detect filesystem type of a partition
+get_filesystem_type() {
+    local partition="$1"
+    sudo blkid -s TYPE "$partition" 2>/dev/null | grep -oP 'TYPE="\K[^"]+' || echo "unknown"
+}
+
+detect_root_partition() {
     local device="$1"
-    local btrfs_part=""
+    local root_part=""
     
-    # Try to find the largest BTRFS partition on the device
+    # Try to find the largest ext4 or BTRFS partition (usually the root filesystem)
     for partition in "${device}"p*; do
         if [[ -b "$partition" ]]; then
-            # Check if partition is BTRFS without mounting
-            if sudo blkid -s TYPE "$partition" 2>/dev/null | grep -q "TYPE=\"btrfs\""; then
-                btrfs_part="$partition"
-                # Return the last (usually largest) BTRFS partition found
+            local fs_type=$(get_filesystem_type "$partition")
+            # Look for ext4, btrfs, ext3, or other common filesystems
+            if [[ "$fs_type" =~ ^(btrfs|ext4|ext3|ext2|xfs|f2fs)$ ]]; then
+                root_part="$partition"
+                # Return the last (usually largest) filesystem partition found
             fi
         fi
     done
     
-    echo "$btrfs_part"
+    echo "$root_part"
 }
 
-ROOT_PART=$(detect_btrfs_partition "$DST")
+ROOT_PART=$(detect_root_partition "$DST")
 
 if [[ -z "$ROOT_PART" ]]; then
-    echo "Error: No BTRFS filesystem found on $DST"
-    echo "The cloned drive may not have a BTRFS filesystem, or the clone failed."
+    echo "Error: No recognizable filesystem found on $DST"
+    echo "The cloned drive may not have a supported filesystem, or the clone failed."
     echo "Please verify the drive manually with: sudo lsblk -f $DST"
     exit 1
 fi
 
-echo "Detected BTRFS partition: $ROOT_PART"
+FS_TYPE=$(get_filesystem_type "$ROOT_PART")
+echo "Detected filesystem: $FS_TYPE on $ROOT_PART"
 echo ""
 
 NEW_UUID=$(uuidgen)
 
-echo "Step 4: Creating unique filesystem UUID for the clone..."
-echo "        New UUID: $NEW_UUID"
-if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY-RUN] Would execute: sudo btrfs filesystem tune --uuid \"$NEW_UUID\" \"$ROOT_PART\""
-    echo "[DRY-RUN] This gives the cloned filesystem a unique identifier"
-else
-    sudo btrfs filesystem tune --uuid "$NEW_UUID" "$ROOT_PART"
-fi
-echo ""
-
-echo "Step 5: Mounting the cloned filesystem to prepare for resize..."
-TEMP_MOUNT="/mnt/fedora_clone"
-if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY-RUN] Would create directory: $TEMP_MOUNT"
-    echo "[DRY-RUN] Would execute: sudo mkdir -p \"$TEMP_MOUNT\""
-    echo "[DRY-RUN] Would execute: sudo mount -t btrfs -o uuid=\"$NEW_UUID\" \"$ROOT_PART\" \"$TEMP_MOUNT\""
-    echo "[DRY-RUN] This temporarily mounts the cloned filesystem"
-else
-    # Clean up any existing mount point
-    sudo umount "$TEMP_MOUNT" 2>/dev/null || true
-    sudo mkdir -p "$TEMP_MOUNT"
-    
-    # Mount with error checking
-    if ! sudo mount -t btrfs -o uuid="$NEW_UUID" "$ROOT_PART" "$TEMP_MOUNT" 2>/dev/null; then
-        echo "Error: Failed to mount $ROOT_PART at $TEMP_MOUNT"
-        echo "Try mounting manually to diagnose: sudo mount -t btrfs $ROOT_PART /mnt/test"
-        exit 1
+# Only update UUID for BTRFS (ext4 and others handle this automatically)
+if [[ "$FS_TYPE" == "btrfs" ]]; then
+    echo "Step 4: Creating unique filesystem UUID for the clone..."
+    echo "        New UUID: $NEW_UUID"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would execute: sudo btrfs filesystem tune --uuid \"$NEW_UUID\" \"$ROOT_PART\""
+        echo "[DRY-RUN] This gives the cloned filesystem a unique identifier"
+    else
+        sudo btrfs filesystem tune --uuid "$NEW_UUID" "$ROOT_PART"
     fi
-fi
-echo ""
-
-echo "Step 6: Expanding BTRFS filesystem to fill the entire $DST drive..."
-if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY-RUN] Would execute: sudo btrfs filesystem resize max \"$TEMP_MOUNT\""
-    echo "[DRY-RUN] This expands the filesystem to use 100% of the available space on $DST"
+    echo ""
 else
-    # This resizes the filesystem to use 100% of the expanded partition
-    sudo btrfs filesystem resize max "$TEMP_MOUNT"
+    echo "Step 4: Skipping UUID update (automatic for $FS_TYPE)"
+    echo ""
 fi
-echo ""
 
-echo "Step 7: Unmounting the cloned filesystem..."
-if [[ "$DRY_RUN" == true ]]; then
-    echo "[DRY-RUN] Would execute: sudo umount \"$TEMP_MOUNT\""
-    echo "[DRY-RUN] This safely disconnects the cloned filesystem"
+# Only mount and resize for BTRFS (ext4 auto-expands)
+if [[ "$FS_TYPE" == "btrfs" ]]; then
+    echo "Step 5: Mounting the cloned filesystem to prepare for resize..."
+    TEMP_MOUNT="/mnt/fedora_clone"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would create directory: $TEMP_MOUNT"
+        echo "[DRY-RUN] Would execute: sudo mkdir -p \"$TEMP_MOUNT\""
+        echo "[DRY-RUN] Would execute: sudo mount -t btrfs -o uuid=\"$NEW_UUID\" \"$ROOT_PART\" \"$TEMP_MOUNT\""
+        echo "[DRY-RUN] This temporarily mounts the cloned filesystem"
+    else
+        # Clean up any existing mount point
+        sudo umount "$TEMP_MOUNT" 2>/dev/null || true
+        sudo mkdir -p "$TEMP_MOUNT"
+        
+        # Mount with error checking
+        if ! sudo mount -t btrfs -o uuid="$NEW_UUID" "$ROOT_PART" "$TEMP_MOUNT" 2>/dev/null; then
+            echo "Error: Failed to mount $ROOT_PART at $TEMP_MOUNT"
+            echo "Try mounting manually to diagnose: sudo mount -t btrfs $ROOT_PART /mnt/test"
+            exit 1
+        fi
+    fi
+    echo ""
 else
-    sudo umount "$TEMP_MOUNT"
+    echo "Step 5: Skipping mount (filesystem $FS_TYPE auto-expands)"
+    echo ""
+fi
+
+if [[ "$FS_TYPE" == "btrfs" ]]; then
+    echo "Step 6: Expanding BTRFS filesystem to fill the entire $DST drive..."
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would execute: sudo btrfs filesystem resize max \"$TEMP_MOUNT\""
+        echo "[DRY-RUN] This expands the filesystem to use 100% of the available space on $DST"
+    else
+        # This resizes the filesystem to use 100% of the expanded partition
+        sudo btrfs filesystem resize max "$TEMP_MOUNT"
+    fi
+    echo ""
+else
+    echo "Step 6: Skipping filesystem resize ($FS_TYPE auto-fills space)"
+    echo ""
+fi
+
+if [[ "$FS_TYPE" == "btrfs" ]]; then
+    echo "Step 7: Unmounting the cloned filesystem..."
+else
+    echo "Step 7: Cleaning up..."
+fi
+if [[ "$FS_TYPE" == "btrfs" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY-RUN] Would execute: sudo umount \"$TEMP_MOUNT\""
+        echo "[DRY-RUN] This safely disconnects the cloned filesystem"
+    else
+        sudo umount \"$TEMP_MOUNT\"
+    fi
 fi
 echo ""
 

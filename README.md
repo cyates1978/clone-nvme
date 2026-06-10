@@ -1,6 +1,7 @@
 # NVMe Cloning Script
 
 This project provides an interactive script to clone one NVMe drive to another.
+It supports multiple filesystem types including BTRFS, ext4, ext3, XFS, and F2FS.
 It has been tested on a Fedora 44 Workstation Live Image
 
 ## ⚠️ IMPORTANT: Use Bash, Not sh
@@ -25,21 +26,24 @@ If you accidentally run it with `sh`, you'll get an error message with instructi
 
 ## Overview
 
-`clone_nvme.sh` safely clones the entire contents of one NVMe drive to another, including partition tables, boot data, and filesystem data. It also handles UUID regeneration and BTRFS filesystem resizing to prevent conflicts when both drives are connected simultaneously.
+`clone_nvme.sh` safely clones the entire contents of one NVMe drive to another, including partition tables, boot data, and filesystem data. It automatically detects the filesystem type and:
+
+- For **BTRFS**: Regenerates UUIDs and resizes the filesystem to use full capacity
+- For **ext4/ext3/XFS/F2FS**: Handles UUID and sizing automatically
 
 ## Requirements
 
 - **Sudo/Root Access**: **YES - REQUIRED**. This script performs privileged operations including:
   - Unmounting filesystems
   - Reading/writing directly to disk devices
-  - Modifying filesystem UUIDs
-  - Resizing filesystems
+  - Modifying filesystem UUIDs (BTRFS)
+  - Resizing filesystems (BTRFS)
   
   You must run this script with `sudo` or have root privileges.
 
 - **NVMe Devices**: At least 2 NVMe drives connected to the system
-- **BTRFS Filesystem**: The script is optimized for BTRFS filesystems (particularly Fedora installations)
-- **Available Tools**: `lsblk`, `dd`, `uuidgen`, `partprobe`, `btrfs`
+- **Supported Filesystems**: BTRFS, ext4, ext3, ext2, XFS, F2FS (or any filesystem `partclone` supports)
+- **Available Tools**: `lsblk`, `dd`, `uuidgen`, `partprobe`
 
 ### Recommended (for faster cloning):
 
