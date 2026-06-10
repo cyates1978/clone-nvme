@@ -1,7 +1,53 @@
 #!/usr/bin/env bash
-# NVMe Clone Script - Version 0.3.0
+# NVMe Clone Script - Version 0.4.0
+# Fedora 44 Compatible NVMe Cloning Tool
 # Exit immediately if a command exits with a non-zero status
 set -e
+
+# --- ERROR HANDLING ---
+# Cleanup on exit
+cleanup() {
+    local exit_code=$?
+    if [[ $exit_code -ne 0 ]]; then
+        echo ""
+        echo "⚠️  ERROR: Script failed with exit code $exit_code"
+        echo "Attempting to unmount temporary mount point..."
+        sudo umount /mnt/fedora_clone 2>/dev/null || true
+    fi
+    exit $exit_code
+}
+trap cleanup EXIT
+
+# --- VALIDATE FEDORA 44 REQUIREMENTS ---
+validate_requirements() {
+    local missing_tools=()
+    
+    # Check for required commands
+    for cmd in lsblk dd partprobe btrfs uuidgen awk grep; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_tools+=("$cmd")
+        fi
+    done
+    
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        echo "Error: The following required tools are not installed:"
+        for tool in "${missing_tools[@]}"; do
+            echo "  - $tool"
+        done
+        echo ""
+        echo "On Fedora 44, install missing tools with:"
+        echo "  sudo dnf install util-linux e2fsprogs btrfs-progs util-linux"
+        exit 1
+    fi
+    
+    # Check if running with sudo/root access
+    if [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+        echo "Error: This script requires sudo access."
+        echo "Please ensure you can run sudo commands without a password prompt,"
+        echo "or run the script with: sudo bash $0"
+        exit 1
+    fi
+}
 
 # --- DRY RUN MODE ---
 DRY_RUN=false
@@ -34,6 +80,9 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Run validation checks on startup
+validate_requirements
 
 # Function to execute or display commands based on dry-run mode
 execute_or_show() {
@@ -83,8 +132,10 @@ select_device() {
     echo ""
     
     # Show numbered list of devices
-    for i in "${!devices[@]}"; do
-        echo "[$(($i + 1))] ${device_info[$i]}"
+    local count=1
+    for info in "${device_info[@]}"; do
+        echo "[$count] $info"
+        count=$((count + 1))
     done
     echo ""
     
@@ -210,13 +261,40 @@ fi
 echo ""
 
 echo "=== UUID FIX & RESIZE ==="
-echo "Generating new UUIDs to prevent conflicts since both drives are connected."
-echo "(Assuming the main OS is partition 3. Adjust based on your lsblk output)"
+echo "Detecting BTRFS filesystems on the cloned drive..."
 echo ""
 
-# Generate a random UUID for the new cloned root/BTRFS partition
-# (Assuming the main OS is partition 3. Adjust based on your lsblk output)
-ROOT_PART="${DST}p3"
+# Detect BTRFS partitions automatically
+detect_btrfs_partition() {
+    local device="$1"
+    local btrfs_part=""
+    
+    # Try to find the largest BTRFS partition on the device
+    for partition in "${device}"p*; do
+        if [[ -b "$partition" ]]; then
+            # Check if partition is BTRFS without mounting
+            if sudo blkid -s TYPE "$partition" 2>/dev/null | grep -q "TYPE=\"btrfs\""; then
+                btrfs_part="$partition"
+                # Return the last (usually largest) BTRFS partition found
+            fi
+        fi
+    done
+    
+    echo "$btrfs_part"
+}
+
+ROOT_PART=$(detect_btrfs_partition "$DST")
+
+if [[ -z "$ROOT_PART" ]]; then
+    echo "Error: No BTRFS filesystem found on $DST"
+    echo "The cloned drive may not have a BTRFS filesystem, or the clone failed."
+    echo "Please verify the drive manually with: sudo lsblk -f $DST"
+    exit 1
+fi
+
+echo "Detected BTRFS partition: $ROOT_PART"
+echo ""
+
 NEW_UUID=$(uuidgen)
 
 echo "Step 4: Creating unique filesystem UUID for the clone..."
@@ -237,8 +315,16 @@ if [[ "$DRY_RUN" == true ]]; then
     echo "[DRY-RUN] Would execute: sudo mount -t btrfs -o uuid=\"$NEW_UUID\" \"$ROOT_PART\" \"$TEMP_MOUNT\""
     echo "[DRY-RUN] This temporarily mounts the cloned filesystem"
 else
+    # Clean up any existing mount point
+    sudo umount "$TEMP_MOUNT" 2>/dev/null || true
     sudo mkdir -p "$TEMP_MOUNT"
-    sudo mount -t btrfs -o uuid="$NEW_UUID" "$ROOT_PART" "$TEMP_MOUNT"
+    
+    # Mount with error checking
+    if ! sudo mount -t btrfs -o uuid="$NEW_UUID" "$ROOT_PART" "$TEMP_MOUNT" 2>/dev/null; then
+        echo "Error: Failed to mount $ROOT_PART at $TEMP_MOUNT"
+        echo "Try mounting manually to diagnose: sudo mount -t btrfs $ROOT_PART /mnt/test"
+        exit 1
+    fi
 fi
 echo ""
 
