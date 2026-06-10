@@ -54,10 +54,14 @@ validate_requirements() {
         partclone_available=true
     elif [[ -x /usr/bin/partclone ]] || [[ -x /usr/sbin/partclone ]]; then
         partclone_available=true
-    elif sudo -n which partclone.auto &> /dev/null 2>&1; then
-        partclone_available=true
-    elif sudo -n which partclone &> /dev/null 2>&1; then
-        partclone_available=true
+    elif [[ $EUID -ne 0 ]]; then
+        # We're not root yet, try with sudo
+        if sudo -n /usr/bin/partclone.auto --version &> /dev/null 2>&1 || \
+           sudo -n /usr/sbin/partclone.auto --version &> /dev/null 2>&1 || \
+           sudo -n /usr/bin/partclone --version &> /dev/null 2>&1 || \
+           sudo -n /usr/sbin/partclone --version &> /dev/null 2>&1; then
+            partclone_available=true
+        fi
     fi
     
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
@@ -88,6 +92,7 @@ validate_requirements() {
         echo "To verify installation, run:"
         echo "  which partclone.auto"
         echo "  which partclone"
+        echo "  rpm -qa | grep partclone"
         echo ""
         read -p "Continue without partclone? (y/N): " proceed
         if [[ "$proceed" != "y" && "$proceed" != "Y" ]]; then
@@ -190,18 +195,12 @@ clone_disk() {
     local source="$1"
     local destination="$2"
     
-    # Detect if partclone is available (using robust methods)
+    # Detect if partclone is available (prioritize by likelihood)
     local use_partclone=false
     local partclone_cmd=""
     
-    # Try to find partclone command
-    if command -v partclone.auto &> /dev/null; then
-        use_partclone=true
-        partclone_cmd="partclone.auto"
-    elif command -v partclone &> /dev/null; then
-        use_partclone=true
-        partclone_cmd="partclone"
-    elif [[ -x /usr/bin/partclone.auto ]]; then
+    # Direct path checks (most reliable)
+    if [[ -x /usr/bin/partclone.auto ]]; then
         use_partclone=true
         partclone_cmd="/usr/bin/partclone.auto"
     elif [[ -x /usr/sbin/partclone.auto ]]; then
@@ -213,6 +212,13 @@ clone_disk() {
     elif [[ -x /usr/sbin/partclone ]]; then
         use_partclone=true
         partclone_cmd="/usr/sbin/partclone"
+    # Fallback to command lookup
+    elif command -v partclone.auto &> /dev/null; then
+        use_partclone=true
+        partclone_cmd="partclone.auto"
+    elif command -v partclone &> /dev/null; then
+        use_partclone=true
+        partclone_cmd="partclone"
     fi
     
     if [[ "$use_partclone" == true ]]; then
