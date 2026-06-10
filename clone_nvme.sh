@@ -172,32 +172,33 @@ select_device() {
     done < <(list_nvme_devices)
     
     if [[ ${#devices[@]} -eq 0 ]]; then
-        echo "Error: No available NVMe devices found."
+        echo "Error: No available NVMe devices found." >&2
         exit 1
     fi
     
-    echo ""
-    echo "=============================================="
-    echo "$prompt"
-    echo "=============================================="
-    echo ""
+    echo "" >&2
+    echo "===============================================" >&2
+    echo "$prompt" >&2
+    echo "===============================================" >&2
+    echo "" >&2
     
     # Show numbered list of devices
     local count=1
     for info in "${device_info[@]}"; do
-        echo "[$count] $info"
+        echo "[$count] $info" >&2
         count=$((count + 1))
     done
-    echo ""
+    echo "" >&2
     
     local choice
     while true; do
         read -p "Enter your selection (1-${#devices[@]}): " choice
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#devices[@]} )); then
+            # Output ONLY the device path to stdout for capture
             echo "/dev/${devices[$((choice - 1))]}"
             return
         else
-            echo "Invalid selection. Please try again (enter a number between 1 and ${#devices[@]})."
+            echo "Invalid selection. Please try again (enter a number between 1 and ${#devices[@]})." >&2
         fi
     done
 }
