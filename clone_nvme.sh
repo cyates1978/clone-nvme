@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# NVMe Clone Script - Version 0.3.0
 # Exit immediately if a command exits with a non-zero status
 set -e
 
