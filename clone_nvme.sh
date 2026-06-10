@@ -45,23 +45,20 @@ validate_requirements() {
     done
     
     # Check for partclone (optional but highly recommended)
+    # Fedora 44 installs partclone as filesystem-specific binaries
     # Try multiple ways to locate it in case it's not in the standard PATH
-    if command -v partclone.auto &> /dev/null; then
+    if [[ -x /usr/bin/partclone.btrfs ]] || [[ -x /usr/sbin/partclone.btrfs ]]; then
         partclone_available=true
-    elif command -v partclone &> /dev/null; then
+    elif command -v partclone.btrfs &> /dev/null; then
         partclone_available=true
     elif [[ -x /usr/bin/partclone.auto ]] || [[ -x /usr/sbin/partclone.auto ]]; then
         partclone_available=true
+    elif command -v partclone.auto &> /dev/null; then
+        partclone_available=true
     elif [[ -x /usr/bin/partclone ]] || [[ -x /usr/sbin/partclone ]]; then
         partclone_available=true
-    elif [[ $EUID -ne 0 ]]; then
-        # We're not root yet, try with sudo
-        if sudo -n /usr/bin/partclone.auto --version &> /dev/null 2>&1 || \
-           sudo -n /usr/sbin/partclone.auto --version &> /dev/null 2>&1 || \
-           sudo -n /usr/bin/partclone --version &> /dev/null 2>&1 || \
-           sudo -n /usr/sbin/partclone --version &> /dev/null 2>&1; then
-            partclone_available=true
-        fi
+    elif command -v partclone &> /dev/null; then
+        partclone_available=true
     fi
     
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
@@ -195,30 +192,31 @@ clone_disk() {
     local source="$1"
     local destination="$2"
     
-    # Detect if partclone is available (prioritize by likelihood)
+    # Detect if partclone is available (prioritize filesystem-specific versions)
+    # Fedora 44 installs partclone as individual filesystem tools
     local use_partclone=false
     local partclone_cmd=""
     
-    # Direct path checks (most reliable)
-    if [[ -x /usr/bin/partclone.auto ]]; then
+    # Direct path checks - prioritize BTRFS version since that's what we use
+    if [[ -x /usr/bin/partclone.btrfs ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/bin/partclone.btrfs"
+    elif [[ -x /usr/sbin/partclone.btrfs ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/sbin/partclone.btrfs"
+    elif [[ -x /usr/bin/partclone.auto ]]; then
         use_partclone=true
         partclone_cmd="/usr/bin/partclone.auto"
     elif [[ -x /usr/sbin/partclone.auto ]]; then
         use_partclone=true
         partclone_cmd="/usr/sbin/partclone.auto"
-    elif [[ -x /usr/bin/partclone ]]; then
-        use_partclone=true
-        partclone_cmd="/usr/bin/partclone"
-    elif [[ -x /usr/sbin/partclone ]]; then
-        use_partclone=true
-        partclone_cmd="/usr/sbin/partclone"
     # Fallback to command lookup
+    elif command -v partclone.btrfs &> /dev/null; then
+        use_partclone=true
+        partclone_cmd="partclone.btrfs"
     elif command -v partclone.auto &> /dev/null; then
         use_partclone=true
         partclone_cmd="partclone.auto"
-    elif command -v partclone &> /dev/null; then
-        use_partclone=true
-        partclone_cmd="partclone"
     fi
     
     if [[ "$use_partclone" == true ]]; then
