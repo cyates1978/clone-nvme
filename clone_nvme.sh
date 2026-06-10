@@ -2,11 +2,80 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# --- CONFIGURATION ---
-# IMPORTANT: Double-check your drive names! 
-# Use 'lsblk' to ensure correct identification.
-SRC="/dev/nvme0n1"
-DST="/dev/nvme1n1"
+# --- INTERACTIVE DEVICE SELECTION ---
+
+# Function to list available NVMe devices
+list_nvme_devices() {
+    lsblk -d -n -o NAME,SIZE,SERIAL | grep "^nvme" | sort
+}
+
+# Function to display menu and get user selection
+select_device() {
+    local prompt="$1"
+    local exclude_device="$2"
+    local devices=()
+    local device_info=()
+    
+    # Build array of available devices
+    while IFS= read -r line; do
+        local device=$(echo "$line" | awk '{print $1}')
+        
+        # Skip if it matches the excluded device
+        if [[ "$exclude_device" != "" && "$device" == "$exclude_device" ]]; then
+            continue
+        fi
+        
+        devices+=("$device")
+        device_info+=("$line")
+    done < <(list_nvme_devices)
+    
+    if [[ ${#devices[@]} -eq 0 ]]; then
+        echo "Error: No available NVMe devices found."
+        exit 1
+    fi
+    
+    echo ""
+    echo "$prompt"
+    echo "=============================================="
+    for i in "${!devices[@]}"; do
+        echo "$((i + 1))) ${device_info[$i]}"
+    done
+    echo ""
+    
+    local choice
+    while true; do
+        read -p "Enter your selection (1-${#devices[@]}): " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#devices[@]} )); then
+            echo "/dev/${devices[$((choice - 1))]}"
+            return
+        else
+            echo "Invalid selection. Please try again."
+        fi
+    done
+}
+
+# Show available devices
+echo "=== AVAILABLE NVMe DEVICES ==="
+list_nvme_devices
+echo ""
+
+# Select source device
+SRC=$(select_device "Select SOURCE device to clone FROM:")
+
+# Select destination device (exclude source)
+DST=$(select_device "Select DESTINATION device to clone TO:" "$(basename $SRC)")
+
+# Validate selection
+if [[ "$SRC" == "$DST" ]]; then
+    echo "Error: Source and destination cannot be the same device."
+    exit 1
+fi
+
+echo ""
+echo "=== CLONE CONFIGURATION ==="
+echo "Source:      $SRC"
+echo "Destination: $DST"
+echo ""
 
 echo "=== WARNING ==="
 echo "This will irreversibly overwrite all data on $DST"
