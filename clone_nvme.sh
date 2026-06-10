@@ -81,12 +81,11 @@ select_device() {
     echo "=============================================="
     echo ""
     
-    # Show detailed information
+    # Show numbered list of devices
     for i in "${!devices[@]}"; do
-        echo "Option $((i + 1)): ${device_info[$i]}"
-        echo "  Device Path: /dev/${devices[$i]}"
-        echo ""
+        echo "[$(($i + 1))] ${device_info[$i]}"
     done
+    echo ""
     
     local choice
     while true; do
