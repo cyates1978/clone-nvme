@@ -3,6 +3,26 @@
 This project provides an interactive script to clone one NVMe drive to another.
 It has been tested on a Fedora 44 Workstation Live Image
 
+## ⚠️ IMPORTANT: Use Bash, Not sh
+
+**This script MUST be run with `bash`, NOT `sh` or `dash`.**
+
+### Correct ways to run:
+```bash
+bash clone_nvme.sh
+bash clone_nvme.sh --dry-run
+sudo bash clone_nvme.sh
+./clone_nvme.sh              # if executable
+```
+
+### WRONG - Do NOT use:
+```bash
+✗ sh clone_nvme.sh
+✗ sudo sh clone_nvme.sh
+```
+
+If you accidentally run it with `sh`, you'll get an error message with instructions.
+
 ## Overview
 
 `clone_nvme.sh` safely clones the entire contents of one NVMe drive to another, including partition tables, boot data, and filesystem data. It also handles UUID regeneration and BTRFS filesystem resizing to prevent conflicts when both drives are connected simultaneously.
@@ -23,15 +43,26 @@ It has been tested on a Fedora 44 Workstation Live Image
 
 ## Usage
 
-### Basic Usage
+### Running the Script
+
+⚠️ **IMPORTANT**: Always use `bash`, not `sh`!
 
 ```bash
-sudo ./clone_nvme.sh
+# Preview what will happen (safe, no changes made)
+bash clone_nvme.sh --dry-run
+
+# Run the actual clone operation
+bash clone_nvme.sh
+
+# Or with sudo if needed for password-less sudo
+sudo bash clone_nvme.sh
 ```
 
-### Command-Line Arguments
+### Get Help
 
-**The script takes no command-line arguments.** All configuration is done interactively:
+```bash
+bash clone_nvme.sh --help
+```
 
 1. The script displays all available NVMe devices with their sizes and serial numbers
 2. You select the **source device** (device to clone FROM)

@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # NVMe Clone Script - Version 0.4.0
 # Fedora 44 Compatible NVMe Cloning Tool
+
+# Ensure this script is run with bash, not sh
+if [[ -z "$BASH_VERSION" ]]; then
+    echo "Error: This script requires bash, not sh."
+    echo ""
+    echo "Please run with one of these commands:"
+    echo "  bash clone_nvme.sh"
+    echo "  ./clone_nvme.sh"
+    echo "  sudo bash clone_nvme.sh"
+    echo ""
+    echo "Do NOT use: sudo sh clone_nvme.sh"
+    exit 1
+fi
+
 # Exit immediately if a command exits with a non-zero status
 set -e
 
@@ -62,14 +76,28 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
             echo ""
-            echo "NVMe Clone Script - Version 0.4.0 (Fedora 44 Compatible)"
+            echo "╔════════════════════════════════════════════════════════════════════╗"
+            echo "║  NVMe Clone Script - Version 0.4.0 (Fedora 44 Compatible)          ║"
+            echo "╚════════════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "⚠️  IMPORTANT: This script MUST be run with BASH, not sh!"
+            echo ""
+            echo "CORRECT ways to run:"
+            echo "  bash clone_nvme.sh"
+            echo "  bash clone_nvme.sh --dry-run"
+            echo "  sudo bash clone_nvme.sh"
+            echo "  ./clone_nvme.sh (with execute permissions)"
+            echo ""
+            echo "WRONG - Do NOT use:"
+            echo "  ✗ sh clone_nvme.sh"
+            echo "  ✗ sudo sh clone_nvme.sh"
             echo ""
             echo "OPTIONS:"
             echo "  --dry-run     Show what would happen without making any changes"
             echo "  --help        Display this help message"
             echo ""
             echo "REQUIREMENTS:"
-            echo "  - Bash 4.0+"
+            echo "  - Bash 4.0+ (NOT sh/dash)"
             echo "  - sudo access (or run as root)"
             echo "  - BTRFS tools (btrfs-progs)"
             echo "  - util-linux (lsblk, partprobe, mount)"
@@ -82,8 +110,8 @@ while [[ $# -gt 0 ]]; do
             echo "  - Resizing the filesystem to fill the destination drive"
             echo ""
             echo "USAGE:"
-            echo "  1. Preview with: $0 --dry-run"
-            echo "  2. Run with:     bash $0"
+            echo "  1. Preview with: bash clone_nvme.sh --dry-run"
+            echo "  2. Run with:     bash clone_nvme.sh"
             echo ""
             exit 0
             ;;
@@ -112,6 +140,15 @@ execute_or_show() {
 # Function to list available NVMe devices
 list_nvme_devices() {
     lsblk -d -n -o NAME,SIZE,SERIAL | grep "^nvme" | sort
+}
+
+# Function to display numbered list of available devices
+display_devices_numbered() {
+    local count=1
+    while IFS= read -r line; do
+        echo "  [$count] $line"
+        count=$((count + 1))
+    done < <(list_nvme_devices)
 }
 
 # Function to display menu and get user selection
@@ -179,7 +216,7 @@ fi
 echo "=== AVAILABLE NVMe DEVICES ==="
 echo "The following NVMe devices are available on your system:"
 echo ""
-list_nvme_devices
+display_devices_numbered
 echo ""
 
 # Select source device
