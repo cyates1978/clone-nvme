@@ -45,7 +45,18 @@ validate_requirements() {
     done
     
     # Check for partclone (optional but highly recommended)
-    if command -v partclone.auto &> /dev/null || command -v partclone &> /dev/null; then
+    # Try multiple ways to locate it in case it's not in the standard PATH
+    if command -v partclone.auto &> /dev/null; then
+        partclone_available=true
+    elif command -v partclone &> /dev/null; then
+        partclone_available=true
+    elif [[ -x /usr/bin/partclone.auto ]] || [[ -x /usr/sbin/partclone.auto ]]; then
+        partclone_available=true
+    elif [[ -x /usr/bin/partclone ]] || [[ -x /usr/sbin/partclone ]]; then
+        partclone_available=true
+    elif sudo -n which partclone.auto &> /dev/null 2>&1; then
+        partclone_available=true
+    elif sudo -n which partclone &> /dev/null 2>&1; then
         partclone_available=true
     fi
     
@@ -73,6 +84,10 @@ validate_requirements() {
         echo ""
         echo "To install partclone on Fedora 44:"
         echo "  sudo dnf install partclone"
+        echo ""
+        echo "To verify installation, run:"
+        echo "  which partclone.auto"
+        echo "  which partclone"
         echo ""
         read -p "Continue without partclone? (y/N): " proceed
         if [[ "$proceed" != "y" && "$proceed" != "Y" ]]; then
@@ -175,10 +190,32 @@ clone_disk() {
     local source="$1"
     local destination="$2"
     
-    # Detect if partclone is available
+    # Detect if partclone is available (using robust methods)
     local use_partclone=false
+    local partclone_cmd=""
+    
+    # Try to find partclone command
     if command -v partclone.auto &> /dev/null; then
         use_partclone=true
+        partclone_cmd="partclone.auto"
+    elif command -v partclone &> /dev/null; then
+        use_partclone=true
+        partclone_cmd="partclone"
+    elif [[ -x /usr/bin/partclone.auto ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/bin/partclone.auto"
+    elif [[ -x /usr/sbin/partclone.auto ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/sbin/partclone.auto"
+    elif [[ -x /usr/bin/partclone ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/bin/partclone"
+    elif [[ -x /usr/sbin/partclone ]]; then
+        use_partclone=true
+        partclone_cmd="/usr/sbin/partclone"
+    fi
+    
+    if [[ "$use_partclone" == true ]]; then
         local clone_method="partclone (fast - only copies used space)"
     else
         local clone_method="dd (slow - copies every byte)"
@@ -196,6 +233,7 @@ clone_disk() {
         fi
         
         echo "Step 2b: Cloning partitions with partclone (fast)..."
+        echo "         Using: $partclone_cmd"
         echo "         Only copying used space - this will be much faster!"
         echo ""
         
@@ -210,7 +248,7 @@ clone_disk() {
                 echo "  Cloning $src_part to $dst_part..."
                 
                 # Use partclone to clone only used space
-                if ! sudo partclone.auto -s "$src_part" -o "$dst_part" -N -L -L 2>/dev/null; then
+                if ! sudo "$partclone_cmd" -s "$src_part" -o "$dst_part" -N -L -L 2>/dev/null; then
                     # Fallback to dd if partclone fails for this partition
                     echo "  Partclone failed for $src_part, falling back to dd..."
                     sudo dd if="$src_part" of="$dst_part" bs=4M status=progress conv=fsync
